@@ -13,6 +13,7 @@
 #include <iterator>
 #include <algorithm>
 #include <chrono>
+#include <thread>
 
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
@@ -93,9 +94,9 @@ UnitreeLidarSDKNode::UnitreeLidarSDKNode(const rclcpp::NodeOptions &options)
     declare_parameter<int>("baudrate", 4000000);
 
     declare_parameter<int>("lidar_port", 6101);
-    declare_parameter<std::string>("lidar_ip", "192.168.1.2");
+    declare_parameter<std::string>("lidar_ip", "192.168.1.62");
     declare_parameter<int>("local_port", 6201);
-    declare_parameter<std::string>("local_ip", "192.168.1.62");
+    declare_parameter<std::string>("local_ip", "192.168.1.2");
 
     declare_parameter<std::string>("cloud_frame", "unilidar_lidar");
     declare_parameter<std::string>("cloud_topic", "unilidar/cloud");
@@ -146,6 +147,20 @@ UnitreeLidarSDKNode::UnitreeLidarSDKNode(const rclcpp::NodeOptions &options)
         exit(0);
     }
 
+    RCLCPP_INFO(
+        this->get_logger(),
+        "Unitree LiDAR startup over %s:%d -> %s:%d, work_mode=%d",
+        lidar_ip_.c_str(),
+        lidar_port_,
+        local_ip_.c_str(),
+        local_port_,
+        work_mode_);
+
+    // Follow the vendor SDK startup sequencing enough to explicitly resume
+    // streaming on bringup. A full reset makes Point-LIO see corrupted per-point
+    // timing on L2, so keep the startup to rotation + work-mode only.
+    lsdk_->startLidarRotation();
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     lsdk_->setLidarWorkMode(work_mode_);
 
     // ROS2
@@ -165,8 +180,6 @@ void UnitreeLidarSDKNode::timer_callback()
     if (result == LIDAR_IMU_DATA_PACKET_TYPE)
     {
         LidarImuData imu;
-        lsdk_->getImuData(imu);
-
         if (lsdk_->getImuData(imu))
         {
             // publish imu message
@@ -176,10 +189,10 @@ void UnitreeLidarSDKNode::timer_callback()
             imuMsg.header.frame_id = imu_frame_;
             imuMsg.header.stamp = timestamp;
 
-            imuMsg.orientation.x = imu.quaternion[0];
-            imuMsg.orientation.y = imu.quaternion[1];
-            imuMsg.orientation.z = imu.quaternion[2];
-            imuMsg.orientation.w = imu.quaternion[3];
+            imuMsg.orientation.w = imu.quaternion[0];
+            imuMsg.orientation.x = imu.quaternion[1];
+            imuMsg.orientation.y = imu.quaternion[2];
+            imuMsg.orientation.z = imu.quaternion[3];
 
             imuMsg.angular_velocity.x = imu.angular_velocity[0];
             imuMsg.angular_velocity.y = imu.angular_velocity[1];
